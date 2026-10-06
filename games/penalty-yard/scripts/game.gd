@@ -6,6 +6,9 @@ const BallScript = preload("res://scripts/ball.gd")
 const YardScript = preload("res://scripts/yard.gd")
 const SessionScript = preload("res://scripts/session.gd")
 const FieldScript = preload("res://scripts/field.gd")
+const Settings = preload("res://scripts/settings.gd")
+const GameAudio = preload("res://scripts/audio.gd")
+const TutorialScript = preload("res://scripts/tutorial.gd")
 enum Mode { SHOOTER, KEEPER }
 enum Phase { READY, COUNTDOWN, FLIGHT, RESULT }
 
@@ -21,6 +24,13 @@ var opponent_hands: Node3D
 var network: Node
 var field: Node3D
 var ui_root: Control
+var settings: Dictionary
+var settings_panel: Control
+var volume_slider: HSlider
+var volume_value: Label
+var fullscreen_box: CheckButton
+var tutorial: Control
+var players: Array[AudioStreamPlayer] = []
 var aim_marker: MeshInstance3D
 var trail: ImmediateMesh
 var trail_points: Array[Vector3] = []
@@ -51,7 +61,6 @@ var controls: Label
 var detail: Label
 var power_bar: ProgressBar
 var pause_panel: Control
-var sound: AudioStreamPlayer
 var shooter_button: Button
 var keeper_button: Button
 var repeat_button: Button
@@ -113,18 +122,29 @@ func _ready() -> void:
 	trail_material.albedo_color = Color("e4b26e")
 	trail_instance.material_override = trail_material
 	add_child(trail_instance)
-	sound = AudioStreamPlayer.new()
-	sound.volume_db = -15.0
-	add_child(sound)
+	for i in range(3):
+		var player := AudioStreamPlayer.new()
+		player.volume_db = -10.0
+		add_child(player)
+		players.append(player)
+	settings = Settings.load_config()
+	Settings.apply_volume(float(settings.volume))
+	Settings.apply_fullscreen(bool(settings.fullscreen))
 	build_ui()
+	build_settings_panel()
 	field = Node3D.new()
 	field.set_script(FieldScript)
 	add_child(field)
+	tutorial = Control.new()
+	tutorial.set_script(TutorialScript)
+	add_child(tutorial)
 	reset_attempt()
 	network = Node.new()
 	network.set_script(SessionScript)
 	network.name = "Session"
 	add_child(network, true)
+	if not bool(settings.tutorial_seen):
+		tutorial.show_intro()
 
 func label(text_value: String, size := 18) -> Label:
 	var node := Label.new()
@@ -186,6 +206,7 @@ func build_ui() -> void:
 	repeat_button = button("Повтор · R", reset_attempt)
 	row.add_child(repeat_button)
 	row.add_child(button("Онлайн", func(): network.show_room()))
+	row.add_child(button("Настройки", toggle_settings))
 	var bottom := PanelContainer.new()
 	bottom.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
 	bottom.offset_left = 22
@@ -220,9 +241,92 @@ func build_ui() -> void:
 	pause_note = label("Локальная тренировка", 18)
 	pause_stack.add_child(pause_note)
 	pause_stack.add_child(button("Продолжить · Esc", func(): set_paused(false)))
+	pause_stack.add_child(button("Настройки", func(): set_paused(false); toggle_settings()))
+	pause_stack.add_child(button("Обучение", func(): set_paused(false); tutorial.show_intro()))
 	pause_stack.add_child(button("Выход", func(): get_tree().quit()))
 	pause_panel.add_child(pause_stack)
 	pause_panel.hide()
+
+func build_settings_panel() -> void:
+	settings_panel = Control.new()
+	settings_panel.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	settings_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	ui_root.add_child(settings_panel)
+	var shade := ColorRect.new()
+	shade.color = Color(0, 0, 0, 0.75)
+	shade.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	settings_panel.add_child(shade)
+	var centre := CenterContainer.new()
+	centre.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	settings_panel.add_child(centre)
+	var panel := PanelContainer.new()
+	panel.custom_minimum_size = Vector2(540, 0)
+	panel.add_theme_stylebox_override("panel", panel_style())
+	centre.add_child(panel)
+	var stack := VBoxContainer.new()
+	stack.add_theme_constant_override("separation", 10)
+	panel.add_child(stack)
+	stack.add_child(label("Настройки", 26))
+	stack.add_child(label("Громкость звука", 17))
+	volume_slider = HSlider.new()
+	volume_slider.min_value = 0.0
+	volume_slider.max_value = 1.0
+	volume_slider.step = 0.05
+	volume_slider.value = float(settings.volume)
+	volume_slider.custom_minimum_size = Vector2(480, 28)
+	volume_slider.focus_mode = Control.FOCUS_NONE
+	volume_slider.value_changed.connect(change_volume)
+	stack.add_child(volume_slider)
+	volume_value = label("%d%%" % int(round(float(settings.volume) * 100)), 16)
+	stack.add_child(volume_value)
+	fullscreen_box = CheckButton.new()
+	fullscreen_box.text = "Полноэкранный режим"
+	fullscreen_box.button_pressed = bool(settings.fullscreen)
+	fullscreen_box.focus_mode = Control.FOCUS_NONE
+	fullscreen_box.toggled.connect(change_fullscreen)
+	stack.add_child(fullscreen_box)
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 12)
+	stack.add_child(row)
+	row.add_child(button("Обучение", func(): hide_settings(); tutorial.show_intro()))
+	row.add_child(button("Закрыть", hide_settings))
+	settings_panel.hide()
+
+func toggle_settings() -> void:
+	if settings_panel.visible:
+		hide_settings()
+	else:
+		hide_room_if_open()
+		settings_panel.show()
+		refresh_settings()
+
+func hide_settings() -> void:
+	settings_panel.hide()
+
+func hide_room_if_open() -> void:
+	if network != null and network.room_panel != null and network.room_panel.visible:
+		network.room_panel.hide()
+
+func refresh_settings() -> void:
+	if settings_panel == null or not settings_panel.visible:
+		return
+	volume_slider.value = float(settings.volume)
+	volume_value.text = "%d%%" % int(round(float(settings.volume) * 100))
+	fullscreen_box.set_pressed_no_signal(bool(settings.fullscreen))
+
+func change_volume(value: float) -> void:
+	settings.volume = clampf(value, 0.0, 1.0)
+	Settings.apply_volume(float(settings.volume))
+	Settings.save_config(settings)
+	volume_value.text = "%d%%" % int(round(float(settings.volume) * 100))
+
+func change_fullscreen(pressed: bool) -> void:
+	settings.fullscreen = pressed
+	Settings.apply_fullscreen(pressed)
+	Settings.save_config(settings)
+
+func overlay_open() -> bool:
+	return (settings_panel != null and settings_panel.visible) or (tutorial != null and tutorial.visible)
 
 func set_mode(value: Mode) -> void:
 	if network != null and network.online:
@@ -276,12 +380,16 @@ func _input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_ESCAPE:
 		if network != null and network.room_panel.visible:
 			network.room_panel.hide()
+		elif settings_panel != null and settings_panel.visible:
+			hide_settings()
+		elif tutorial != null and tutorial.visible:
+			tutorial.close()
 		else:
 			set_paused(not paused)
 		get_viewport().set_input_as_handled()
 
 func _unhandled_input(event: InputEvent) -> void:
-	if paused or (network != null and network.room_panel.visible):
+	if paused or (network != null and network.room_panel.visible) or overlay_open():
 		return
 	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_B and not network.online:
 		field.toggle_practice()
@@ -327,6 +435,7 @@ func _unhandled_input(event: InputEvent) -> void:
 				if phase == Phase.READY:
 					phase = Phase.COUNTDOWN
 					countdown = 2.0
+					play_sound("whistle")
 				elif phase == Phase.FLIGHT and catch_cooldown <= 0.0:
 					catch_remaining = Tuning.CATCH_DURATION
 					catch_cooldown = Tuning.CATCH_COOLDOWN
@@ -354,10 +463,21 @@ func update_pointer() -> void:
 		gloves.position = hand_target
 	aim_marker.visible = mode == Mode.SHOOTER and phase == Phase.READY
 
+func play_sound(name: String) -> void:
+	if DisplayServer.get_name() == "headless":
+		return
+	var chosen := players[0]
+	for player in players:
+		if not player.playing:
+			chosen = player
+			break
+	chosen.stream = GameAudio.stream(name)
+	chosen.play()
+
 func fire(target: Vector3, strength: float, curve: float) -> void:
 	phase = Phase.FLIGHT
 	ball.launch(target, strength, curve)
-	play_tone(140.0, 0.09)
+	play_sound("kick")
 	update_ui()
 
 func launch_training_shot() -> void:
@@ -371,7 +491,7 @@ func _physics_process(delta: float) -> void:
 	if network != null and network.online:
 		network.tick(delta)
 		return
-	if paused or (network != null and network.room_panel.visible):
+	if paused or (network != null and network.room_panel.visible) or overlay_open():
 		return
 	if field.practice:
 		return
@@ -409,7 +529,7 @@ func step_flight(delta: float, keeper_enabled: bool) -> void:
 				ball.position.z = 0.24
 				ball.velocity.z = absf(ball.velocity.z) * 0.55
 				ball.velocity.y += 1.0
-				play_tone(95.0, 0.07)
+				play_sound("body")
 	if phase == Phase.FLIGHT:
 		if absf(ball.position.x) > 8.0 or ball.position.z < -2.0 or ball.position.z > 16.0 or ball.position.y > 8.0:
 			finish_attempt("miss")
@@ -448,7 +568,7 @@ func finish_attempt(outcome: String) -> void:
 		"goal": result_text = "ГОЛ!" if mode == Mode.SHOOTER else "Пропущен гол"
 		"save": result_text = "ПОЙМАЛ!"
 		"miss": result_text = "Мимо ворот" if mode == Mode.SHOOTER else "Ворота защищены"
-	play_tone(660.0 if outcome in ["goal", "save"] else 220.0, 0.18)
+	play_sound(GameAudio.outcome_sound(outcome))
 	update_ui()
 
 func redraw_trail() -> void:
@@ -467,7 +587,7 @@ func update_ui() -> void:
 		network.draw_ui()
 		return
 	header.text = "Тренировка удара" if mode == Mode.SHOOTER else "Тренировка вратаря"
-	stats.text = "Голы: %d / %d   ·   Защищённые попытки: %d / %d   ·   Тренировка 0.4" % [goals, shots_completed, saves, keeper_completed]
+	stats.text = "Голы: %d / %d   ·   Защищённые попытки: %d / %d   ·   Тренировка 0.5" % [goals, shots_completed, saves, keeper_completed]
 	repeat_button.text = "Повтор · R"
 	repeat_button.disabled = false
 	pause_note.text = "Локальная тренировка"
@@ -491,24 +611,6 @@ func update_ui() -> void:
 		Phase.COUNTDOWN: status.text = "Удар через %d…" % maxi(1, int(ceil(countdown)))
 		Phase.FLIGHT: status.text = "Мяч в игре" if mode == Mode.SHOOTER else "Лови!"
 		Phase.RESULT: status.text = result_text + "   ·   R — следующая попытка"
-
-func play_tone(frequency: float, duration: float) -> void:
-	if DisplayServer.get_name() == "headless":
-		return
-	sound.stop()
-	var stream := AudioStreamWAV.new()
-	stream.format = AudioStreamWAV.FORMAT_16_BITS
-	stream.mix_rate = 16000
-	var count := int(duration * stream.mix_rate)
-	var samples := PackedByteArray()
-	samples.resize(count * 2)
-	for i in range(count):
-		var envelope := pow(1.0 - float(i) / count, 2.0)
-		var wave := sin(TAU * frequency * float(i) / stream.mix_rate)
-		samples.encode_s16(i * 2, int(wave * envelope * 9000))
-	stream.data = samples
-	sound.stream = stream
-	sound.play()
 
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_APPLICATION_FOCUS_OUT and pause_panel != null:

@@ -5,6 +5,7 @@ const MatchRules = preload("res://scripts/match_rules.gd")
 const Rules = preload("res://scripts/rules.gd")
 const Tuning = preload("res://scripts/tuning.gd")
 const FieldRules = preload("res://scripts/field_rules.gd")
+const GameAudio = preload("res://scripts/audio.gd")
 const PROTOCOL := 4
 const DEFAULT_PORT := 24567
 enum State { WAITING, READY, COUNTDOWN, AIM, FLIGHT, RESULT, FINISHED, BUILD }
@@ -377,6 +378,8 @@ func _accept_command(sender: int, nonce: int, operation: String, data: Dictionar
 			layout[slot*2+int(data.slot)] = {"owner":slot,"kind":str(data.kind),"cell":int(data.cell),"rotation":int(data.rotation)}
 			field_revision += 1
 			game.field.apply_layout(layout,field_revision)
+			event_id += 1
+			game.play_sound("place")
 			_next_builder()
 			return
 	if operation == "ready" and state == State.READY:
@@ -386,6 +389,8 @@ func _accept_command(sender: int, nonce: int, operation: String, data: Dictionar
 			state = State.COUNTDOWN
 			timer = countdown_duration
 			game.phase = game.Phase.COUNTDOWN
+			event_id += 1
+			game.play_sound("whistle")
 		_publish(true)
 		return
 	if operation == "rematch" and state == State.FINISHED:
@@ -525,7 +530,7 @@ func tick(delta: float) -> void:
 		return
 	if game.charging and not game.paused:
 		game.power = minf(1.0, game.power + delta / Tuning.CHARGE_TIME)
-	var blocked: bool = game.paused or room_panel.visible
+	var blocked: bool = game.paused or room_panel.visible or game.overlay_open()
 	var local_axis: float = 0.0 if blocked else game.movement_axis()
 	if not blocked and state != State.BUILD:
 		game.update_pointer()
@@ -631,7 +636,7 @@ func finish_attempt(outcome: String) -> void:
 	game.charging = false
 	match_rules.record(outcome == "goal")
 	event_id += 1
-	game.play_tone(660 if outcome in ["goal", "save"] else 220, 0.18)
+	game.play_sound(GameAudio.outcome_sound(outcome))
 	_publish(true)
 
 func _snapshot() -> Dictionary:
@@ -725,10 +730,11 @@ func _apply_state(data: Dictionary) -> void:
 		game.charging = false
 	if int(data.event) > last_event_id:
 		last_event_id = int(data.event)
-		if state == State.FLIGHT:
-			game.play_tone(140, 0.09)
-		elif state == State.RESULT:
-			game.play_tone(660, 0.18)
+		match int(data.state):
+			State.FLIGHT: game.play_sound("kick")
+			State.COUNTDOWN: game.play_sound("whistle")
+			State.RESULT: game.play_sound(GameAudio.outcome_sound(str(data.outcome)))
+			State.BUILD: game.play_sound("place")
 	last_outcome = str(data.outcome)
 	message = "Друг подключился. Матч на двоих."
 	if not was_connected:
@@ -745,14 +751,14 @@ func draw_ui() -> void:
 	game.pause_note.text = "Матч продолжается, пока открыто меню."
 	if not connected:
 		game.header.text = "Ждём подключения"
-		game.stats.text = "Сетевая дуэль · версия 0.4"
+		game.stats.text = "Сетевая дуэль · версия 0.5"
 		game.status.text = "Открой «Онлайн», чтобы увидеть состояние комнаты"
 		game.detail.text = message
 		game.controls.text = "Локальная тренировка доступна после выхода из комнаты"
 		return
 	var slot := local_slot()
 	game.header.text = "Твой удар" if local_shooter() else "Ты защищаешь ворота"
-	game.stats.text = "Ты %d : %d Друг   ·   %s   ·   Онлайн 0.4" % [match_rules.scores[slot], match_rules.scores[1 - slot], "Раунд %d / 5" % (match_rules.round_index + 1) if match_rules.round_index < 5 else "Дополнительные попытки"]
+	game.stats.text = "Ты %d : %d Друг   ·   %s   ·   Онлайн 0.5" % [match_rules.scores[slot], match_rules.scores[1 - slot], "Раунд %d / 5" % (match_rules.round_index + 1) if match_rules.round_index < 5 else "Дополнительные попытки"]
 	game.detail.text = "Подкрутка: %s   ·   Сила: %d%%" % [["влево", "нет", "вправо"][game.spin + 1], int(game.power * 100)] if local_shooter() else "Рывок: %s   ·   Ловля: %s" % ["использован" if game.dash_used else "готов", "активна" if game.catch_remaining > 0 else "готова"]
 	game.controls.text = "Мышь — прицел   ·   ЛКМ удержать и отпустить — удар   ·   Q / E — подкрутка   ·   ПКМ — отмена" if local_shooter() else "A / D — движение   ·   Мышь — руки   ·   ЛКМ — ловля   ·   Space + A / D — рывок"
 	match state:

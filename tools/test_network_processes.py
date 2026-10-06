@@ -3,7 +3,13 @@ import argparse
 from pathlib import Path
 import socket
 import subprocess
+import threading
 import time
+
+
+def drain(stream, sink):
+    for line in stream:
+        sink.append(line)
 
 
 def main():
@@ -16,14 +22,23 @@ def main():
         port = probe.getsockname()[1]
     command = [args.engine, "--headless", "--path", str(game), "--script", "tests/process_worker.gd", "--"]
     processes = []
+    outputs = []
     try:
         host = subprocess.Popen(command + ["host", str(port)], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
         processes.append(host)
         time.sleep(0.5)
         client = subprocess.Popen(command + ["client", str(port)], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
         processes.append(client)
+        # Drain both pipes while the match runs: waiting for a piped child before
+        # reading can stall it on Windows even when the output is tiny.
         for process in processes:
-            output, _ = process.communicate(timeout=35)
+            lines = []
+            outputs.append(lines)
+            threading.Thread(target=drain, args=(process.stdout, lines), daemon=True).start()
+        for process in processes:
+            process.wait(timeout=35)
+        for process, lines in zip(processes, outputs):
+            output = "".join(lines)
             print(output, end="")
             if process.returncode or "SCRIPT ERROR:" in output or "ERROR:" in output or "PASS: full match and draw" not in output:
                 raise SystemExit("Two-process network test failed")
@@ -31,7 +46,7 @@ def main():
         for process in processes:
             if process.poll() is None:
                 process.kill()
-                process.communicate()
+                process.wait()
 
 
 if __name__ == "__main__":

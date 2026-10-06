@@ -269,7 +269,7 @@ func update_hover() -> void:
 				hovered_cell = cell
 
 func tick() -> void:
-	practice_button.visible = not practice and (game.network == null or not game.network.online) and not game.paused and (game.network == null or not game.network.room_panel.visible)
+	practice_button.visible = not practice and (game.network == null or not game.network.online) and not game.paused and (game.network == null or not game.network.room_panel.visible) and not game.overlay_open()
 	clear_button.visible = practice_button.visible and layout != FieldRules.empty_layout()
 	if practice:
 		game.shooter_button.disabled = true
