@@ -1,0 +1,25 @@
+; Native desktop prototype. Open in Godot 4.5.1.
+config_version=5
+
+[application]
+config/name="PocketChaos · Дворовые пенальти"
+run/main_scene="res://main.tscn"
+config/features=PackedStringArray("4.5", "GL Compatibility")
+config/description="Stage 2: local shooting and goalkeeping training."
+
+[display]
+window/size/viewport_width=1280
+window/size/viewport_height=720
+window/size/window_width_override=1280
+window/size/window_height_override=720
+window/stretch/mode="canvas_items"
+
+[physics]
+common/physics_ticks_per_second=120
+
+[rendering]
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"
+textures/default_filters/use_nearest_mipmap_filter=false
+environment/defaults/default_clear_color=Color(0.055, 0.075, 0.105, 1)
+

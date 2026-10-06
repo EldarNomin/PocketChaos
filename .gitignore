@@ -1,0 +1,8 @@
+.godot/
+.engine/
+builds/
+*.zip
+*.log
+__pycache__/
+.DS_Store
+
