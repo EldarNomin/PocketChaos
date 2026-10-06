@@ -53,6 +53,7 @@ func run() -> void:
 	h.countdown_duration = 0.06
 	h.result_duration = 0.5 if latency else 0.25
 	h.prepare_duration = 4.0
+	h.build_duration = 0.06
 	var port := 25000 + randi_range(0, 5000)
 	check(h.start_host(port) == OK, "Host opens UDP room")
 	check(c.join_room("127.0.0.1", port) == OK, "Client starts real ENet connection")

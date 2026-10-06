@@ -43,14 +43,17 @@ jobs:
           timeout 60s "$engine" --headless --script tests/test_match.gd 2>&1 | tee /tmp/match.log
           timeout 90s "$engine" --headless --script tests/test_network.gd 2>&1 | tee /tmp/network.log
           timeout 90s "$engine" --headless --script tests/test_network.gd -- --latency 2>&1 | tee /tmp/latency.log
-          if grep -E 'SCRIPT ERROR:|^ERROR:' /tmp/import.log /tmp/smoke.log /tmp/rules.log /tmp/scene.log /tmp/match.log /tmp/network.log /tmp/latency.log; then exit 1; fi
+          timeout 60s "$engine" --headless --script tests/test_field.gd 2>&1 | tee /tmp/field.log
+          timeout 90s "$engine" --headless --script tests/test_network_build.gd 2>&1 | tee /tmp/build.log
+          timeout 90s "$engine" --headless --script tests/test_network_build.gd -- --latency 2>&1 | tee /tmp/build-latency.log
+          if grep -E 'SCRIPT ERROR:|^ERROR:' /tmp/import.log /tmp/smoke.log /tmp/rules.log /tmp/scene.log /tmp/match.log /tmp/network.log /tmp/latency.log /tmp/field.log /tmp/build.log /tmp/build-latency.log; then exit 1; fi
       - name: Test two independent processes
         run: python3 tools/test_network_processes.py Godot_v4.5.1-stable_linux.x86_64
       - name: Package Windows preview
         run: python3 tools/package_windows.py
       - uses: actions/upload-artifact@v4
         with:
-          name: penalty-yard-stage-3-windows
-          path: builds/penalty-yard-stage-3-windows.zip
+          name: penalty-yard-stage-4-windows
+          path: builds/penalty-yard-stage-4-windows.zip
           compression-level: 0
           retention-days: 14

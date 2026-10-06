@@ -15,6 +15,7 @@ func run() -> void:
 		network.countdown_duration = 0.06
 		network.prepare_duration = 0.06
 		network.result_duration = 0.06
+		network.build_duration = 0.06
 	var error: int = network.start_host(int(args[1])) if is_host else network.join_room("127.0.0.1", int(args[1]))
 	var voted := -1
 	var deadline := Time.get_ticks_msec() + 25000

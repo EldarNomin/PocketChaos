@@ -5,6 +5,7 @@ const Tuning = preload("res://scripts/tuning.gd")
 const BallScript = preload("res://scripts/ball.gd")
 const YardScript = preload("res://scripts/yard.gd")
 const SessionScript = preload("res://scripts/session.gd")
+const FieldScript = preload("res://scripts/field.gd")
 enum Mode { SHOOTER, KEEPER }
 enum Phase { READY, COUNTDOWN, FLIGHT, RESULT }
 
@@ -18,6 +19,7 @@ var training_striker: Node3D
 var opponent_keeper: Node3D
 var opponent_hands: Node3D
 var network: Node
+var field: Node3D
 var ui_root: Control
 var aim_marker: MeshInstance3D
 var trail: ImmediateMesh
@@ -115,6 +117,9 @@ func _ready() -> void:
 	sound.volume_db = -15.0
 	add_child(sound)
 	build_ui()
+	field = Node3D.new()
+	field.set_script(FieldScript)
+	add_child(field)
 	reset_attempt()
 	network = Node.new()
 	network.set_script(SessionScript)
@@ -278,6 +283,12 @@ func _input(event: InputEvent) -> void:
 func _unhandled_input(event: InputEvent) -> void:
 	if paused or (network != null and network.room_panel.visible):
 		return
+	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_B and not network.online:
+		field.toggle_practice()
+		return
+	if field.practice:
+		field.handle_input(event)
+		return
 	if network != null and network.online:
 		network.handle_input(event)
 		update_ui()
@@ -356,10 +367,13 @@ func launch_training_shot() -> void:
 	fire(target, 0.35, 0.0)
 
 func _physics_process(delta: float) -> void:
+	field.tick()
 	if network != null and network.online:
 		network.tick(delta)
 		return
 	if paused or (network != null and network.room_panel.visible):
+		return
+	if field.practice:
 		return
 	if charging:
 		power = minf(1.0, power + delta / Tuning.CHARGE_TIME)
@@ -383,7 +397,7 @@ func _physics_process(delta: float) -> void:
 	update_ui()
 
 func step_flight(delta: float, keeper_enabled: bool) -> void:
-	var previous: Vector3 = ball.step(delta)
+	var previous: Vector3 = ball.step(delta, field.wind_acceleration(ball.position))
 	var outcome := Rules.attempt_result(previous, ball.position, hand_target, keeper_enabled and catch_remaining > 0.0)
 	if outcome != "":
 		finish_attempt(outcome)
@@ -453,7 +467,7 @@ func update_ui() -> void:
 		network.draw_ui()
 		return
 	header.text = "Тренировка удара" if mode == Mode.SHOOTER else "Тренировка вратаря"
-	stats.text = "Голы: %d / %d   ·   Защищённые попытки: %d / %d   ·   Тренировка 0.3" % [goals, shots_completed, saves, keeper_completed]
+	stats.text = "Голы: %d / %d   ·   Защищённые попытки: %d / %d   ·   Тренировка 0.4" % [goals, shots_completed, saves, keeper_completed]
 	repeat_button.text = "Повтор · R"
 	repeat_button.disabled = false
 	pause_note.text = "Локальная тренировка"

@@ -1,4 +1,4 @@
-"""Make a self-contained stage-3 Windows preview using the pinned Godot runner.
+"""Make a self-contained stage-4 Windows preview using the pinned Godot runner.
 
 This is a prototype package, not a final exported Steam build.
 """
@@ -35,7 +35,7 @@ def main():
         raise SystemExit("Official engine archive checksum mismatch")
     license_data = args.license_file.read_bytes() if args.license_file else download(LICENSE_URL)
     copyright_data = args.copyright_file.read_bytes() if args.copyright_file else download(COPYRIGHT_URL)
-    destination = ROOT / "builds" / "penalty-yard-stage-3-windows.zip"
+    destination = ROOT / "builds" / "penalty-yard-stage-4-windows.zip"
     destination.parent.mkdir(exist_ok=True)
     with zipfile.ZipFile(destination, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as package:
         for path in sorted(GAME.rglob("*")):

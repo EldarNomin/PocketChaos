@@ -53,13 +53,14 @@ func launch(target: Vector3, power: float, spin: float) -> void:
 	elapsed = 0.0
 	live = true
 
-func step(delta: float) -> Vector3:
+func step(delta: float, external_acceleration := Vector3.ZERO) -> Vector3:
 	var previous := position
 	if not live:
 		return previous
 	elapsed += delta
 	velocity.y -= Tuning.GRAVITY * delta
 	velocity.x += curve * Tuning.CURVE_ACCELERATION * delta
+	velocity += external_acceleration * delta
 	var motion := velocity * delta
 	# Consume remaining travel after a bounce, including at high speed.
 	for iteration in range(4):
@@ -68,6 +69,8 @@ func step(delta: float) -> Vector3:
 			break
 		var normal := collision.get_normal()
 		var restitution := Tuning.GROUND_RESTITUTION if normal.y > 0.7 else Tuning.FRAME_RESTITUTION
+		if collision.get_collider().has_meta("shield"):
+			restitution = Tuning.SHIELD_RESTITUTION
 		velocity = velocity.bounce(normal) * restitution
 		motion = collision.get_remainder().bounce(normal) * restitution
 		if normal.y > 0.7:

@@ -4,9 +4,10 @@ extends Node
 const MatchRules = preload("res://scripts/match_rules.gd")
 const Rules = preload("res://scripts/rules.gd")
 const Tuning = preload("res://scripts/tuning.gd")
-const PROTOCOL := 3
+const FieldRules = preload("res://scripts/field_rules.gd")
+const PROTOCOL := 4
 const DEFAULT_PORT := 24567
-enum State { WAITING, READY, COUNTDOWN, AIM, FLIGHT, RESULT, FINISHED }
+enum State { WAITING, READY, COUNTDOWN, AIM, FLIGHT, RESULT, FINISHED, BUILD }
 
 var game: Node3D
 var peer: ENetMultiplayerPeer
@@ -54,6 +55,11 @@ var client_dash_axis := 0.0
 var local_dash_pending := false
 var accepted_shots := 0
 var rejected_commands := 0
+var build_duration := 15.0
+var build_round := -1
+var build_turn := 0
+var build_slot := 0
+var field_revision := 0
 var room_panel: Control
 var room_status: Label
 var address_field: LineEdit
@@ -159,6 +165,9 @@ func start_host(port: int) -> Error:
 	pending_id = 0
 	connection_clock = 0.0
 	multiplayer.multiplayer_peer = peer
+	game.field.clear()
+	field_revision = game.field.revision
+	build_round = -1
 	var addresses: Array[String] = []
 	for address in IP.get_local_addresses():
 		if ":" not in address and not address.begins_with("127."):
@@ -190,6 +199,9 @@ func join_room(address: String, port: int) -> Error:
 	last_event_id = 0
 	connection_clock = 0.0
 	multiplayer.multiplayer_peer = peer
+	game.field.clear()
+	# Force the first authoritative layout to replace any local training field.
+	game.field.revision = -1
 	message = "Подключаемся к %s:%d…" % [address, port]
 	game.reset_attempt(true)
 	game.set_paused(false)
@@ -208,6 +220,7 @@ func close_session(reason := "Комната закрыта.") -> void:
 	pending_id = 0
 	state = State.WAITING
 	message = reason
+	game.field.clear()
 	game.mode = game.Mode.SHOOTER
 	game.reset_attempt(true)
 	game.set_paused(false)
@@ -266,6 +279,10 @@ func keeper_peer() -> int:
 	return guest_id if active_shooter_slot == 0 else 1
 
 func _prepare_attempt() -> void:
+	if match_rules.shot_in_round == 0 and match_rules.round_index in [1,2,3,4] and build_round != match_rules.round_index:
+		_begin_build()
+		return
+	game.field.hide_builder()
 	attempt_id += 1
 	active_shooter_slot = match_rules.shooter_slot()
 	ready_votes = [false, false]
@@ -281,6 +298,30 @@ func _prepare_attempt() -> void:
 	last_outcome = ""
 	_apply_local_role()
 	_publish(true)
+
+func _begin_build() -> void:
+	build_round = match_rules.round_index
+	build_turn = 0
+	_start_build_turn()
+
+func _start_build_turn() -> void:
+	# Build turns use distinct nonces, so late commands cannot affect another turn.
+	attempt_id += 1
+	state = State.BUILD
+	build_slot = (build_round + build_turn) % 2
+	timer = build_duration
+	charge_start = -1.0
+	game.reset_attempt(true)
+	game.field.show_builder()
+	applied_attempt = attempt_id
+	_publish(true)
+
+func _next_builder() -> void:
+	build_turn += 1
+	if build_turn < 2:
+		_start_build_turn()
+	else:
+		_prepare_attempt()
 
 func _apply_local_role() -> void:
 	game.mode = game.Mode.SHOOTER if local_shooter() else game.Mode.KEEPER
@@ -316,6 +357,28 @@ func _accept_command(sender: int, nonce: int, operation: String, data: Dictionar
 		rejected_commands += 1
 		return
 	var slot := 0 if sender == 1 else 1
+	if state == State.BUILD and slot == build_slot:
+		if operation == "skip":
+			_next_builder()
+			return
+		if operation == "place":
+			if not (data.get("slot") is int and data.get("kind") is String and data.get("cell") is int and data.get("rotation") is int):
+				rejected_commands += 1
+				return
+			var error := FieldRules.placement_error(game.field.layout,slot,int(data.slot),str(data.kind),int(data.cell),int(data.rotation))
+			if error != "":
+				rejected_commands += 1
+				if sender == 1:
+					game.field.last_error = error
+				else:
+					_build_error.rpc_id(sender,attempt_id,error)
+				return
+			var layout: Array = game.field.layout.duplicate(true)
+			layout[slot*2+int(data.slot)] = {"owner":slot,"kind":str(data.kind),"cell":int(data.cell),"rotation":int(data.rotation)}
+			field_revision += 1
+			game.field.apply_layout(layout,field_revision)
+			_next_builder()
+			return
 	if operation == "ready" and state == State.READY:
 		ready_votes[slot] = true
 		local_ready = ready_votes[local_slot()]
@@ -333,6 +396,9 @@ func _accept_command(sender: int, nonce: int, operation: String, data: Dictionar
 			match_rules.reset(first)
 			rematch_votes = [false, false]
 			local_rematch = false
+			game.field.clear()
+			field_revision = game.field.revision
+			build_round = -1
 			_prepare_attempt()
 		else:
 			_publish(true)
@@ -377,6 +443,11 @@ func _accept_command(sender: int, nonce: int, operation: String, data: Dictionar
 			return
 	rejected_commands += 1
 
+@rpc("authority", "call_remote", "reliable", 0)
+func _build_error(nonce: int, error: String) -> void:
+	if online and state == State.BUILD and nonce == attempt_id:
+		game.field.last_error = error
+
 func send_pose(nonce: int, axis: float, offset: Vector3, sequence: int) -> void:
 	if not online or not connected:
 		return
@@ -402,6 +473,9 @@ func _accept_pose(sender: int, nonce: int, axis: float, offset: Vector3, sequenc
 
 func handle_input(event: InputEvent) -> void:
 	if not connected or room_panel.visible:
+		return
+	if state == State.BUILD:
+		game.field.handle_input(event)
 		return
 	if event is InputEventKey and event.pressed and not event.echo:
 		if event.keycode == KEY_R:
@@ -453,9 +527,9 @@ func tick(delta: float) -> void:
 		game.power = minf(1.0, game.power + delta / Tuning.CHARGE_TIME)
 	var blocked: bool = game.paused or room_panel.visible
 	var local_axis: float = 0.0 if blocked else game.movement_axis()
-	if not blocked:
+	if not blocked and state != State.BUILD:
 		game.update_pointer()
-	if not local_shooter():
+	if not local_shooter() and state != State.BUILD:
 		input_clock += delta
 		if input_clock >= 1.0 / 30.0:
 			input_clock = 0.0
@@ -480,12 +554,16 @@ func _tick_host(delta: float) -> void:
 			game.dash_remaining = maxf(0, game.dash_remaining - delta)
 		game.keeper_x = clampf(game.keeper_x - movement * delta, -2.7, 2.7)
 	game.hand_target = Vector3(game.keeper_x, 0, 0) + keeper_offset
-	if not local_shooter():
+	if not local_shooter() and state != State.BUILD:
 		game.camera.position.x = game.keeper_x
 		game.gloves.position = game.hand_target
 	game.opponent_keeper.position.x = game.keeper_x
 	game.opponent_hands.position = game.hand_target
-	if state == State.COUNTDOWN:
+	if state == State.BUILD:
+		timer -= delta
+		if timer <= 0:
+			_next_builder()
+	elif state == State.COUNTDOWN:
 		timer -= delta
 		if timer <= 0:
 			state = State.AIM
@@ -524,7 +602,7 @@ func _tick_client(delta: float, axis: float) -> void:
 		game.ball.position = remote_ball_position
 	game.catch_remaining = maxf(0, game.catch_remaining - delta)
 	game.catch_cooldown = maxf(0, game.catch_cooldown - delta)
-	if not local_shooter():
+	if not local_shooter() and state != State.BUILD:
 		if state in [State.COUNTDOWN, State.AIM, State.FLIGHT]:
 			var speed := axis * Tuning.KEEPER_SPEED
 			if client_dash_time > 0:
@@ -569,6 +647,8 @@ func _snapshot() -> Dictionary:
 		"hands": game.hand_target, "dash": game.dash_used,
 		"catch": game.catch_remaining, "cooldown": game.catch_cooldown,
 		"event": event_id, "outcome": last_outcome,
+		"field": game.field.layout.duplicate(true), "field_revision": field_revision,
+		"build_round": build_round, "build_turn": build_turn, "build_slot": build_slot,
 	}
 
 func _publish(reliable: bool) -> void:
@@ -609,8 +689,19 @@ func _apply_state(data: Dictionary) -> void:
 	rematch_votes.assign(data.rematch)
 	local_ready = ready_votes[1]
 	local_rematch = rematch_votes[1]
+	build_round = int(data.build_round)
+	build_turn = int(data.build_turn)
+	build_slot = int(data.build_slot)
+	field_revision = int(data.field_revision)
+	game.field.apply_layout(data.field,field_revision)
 	if applied_attempt != attempt_id:
-		_apply_local_role()
+		if state == State.BUILD:
+			game.reset_attempt(true)
+			game.field.show_builder()
+			applied_attempt = attempt_id
+		else:
+			game.field.hide_builder()
+			_apply_local_role()
 		input_seq = 0
 		client_dash_time = 0
 	remote_ball_position = data.ball
@@ -654,17 +745,22 @@ func draw_ui() -> void:
 	game.pause_note.text = "Матч продолжается, пока открыто меню."
 	if not connected:
 		game.header.text = "Ждём подключения"
-		game.stats.text = "Сетевая дуэль · версия 0.3"
+		game.stats.text = "Сетевая дуэль · версия 0.4"
 		game.status.text = "Открой «Онлайн», чтобы увидеть состояние комнаты"
 		game.detail.text = message
 		game.controls.text = "Локальная тренировка доступна после выхода из комнаты"
 		return
 	var slot := local_slot()
 	game.header.text = "Твой удар" if local_shooter() else "Ты защищаешь ворота"
-	game.stats.text = "Ты %d : %d Друг   ·   %s   ·   Онлайн 0.3" % [match_rules.scores[slot], match_rules.scores[1 - slot], "Раунд %d / 5" % (match_rules.round_index + 1) if match_rules.round_index < 5 else "Дополнительные попытки"]
+	game.stats.text = "Ты %d : %d Друг   ·   %s   ·   Онлайн 0.4" % [match_rules.scores[slot], match_rules.scores[1 - slot], "Раунд %d / 5" % (match_rules.round_index + 1) if match_rules.round_index < 5 else "Дополнительные попытки"]
 	game.detail.text = "Подкрутка: %s   ·   Сила: %d%%" % [["влево", "нет", "вправо"][game.spin + 1], int(game.power * 100)] if local_shooter() else "Рывок: %s   ·   Ловля: %s" % ["использован" if game.dash_used else "готов", "активна" if game.catch_remaining > 0 else "готова"]
 	game.controls.text = "Мышь — прицел   ·   ЛКМ удержать и отпустить — удар   ·   Q / E — подкрутка   ·   ПКМ — отмена" if local_shooter() else "A / D — движение   ·   Мышь — руки   ·   ЛКМ — ловля   ·   Space + A / D — рывок"
 	match state:
+		State.BUILD:
+			game.header.text = "Меняем площадку"
+			game.status.text = "Твой ход: %d сек." % maxi(1,int(ceil(timer))) if build_slot == slot else "Друг размещает предмет: %d сек." % maxi(1,int(ceil(timer)))
+			game.detail.text = "До двух предметов от каждого. Поле одинаковое для обоих ударов."
+			game.controls.text = "Выбери предмет слева   ·   Клик по площадке — поставить   ·   Q / E — угол   ·   R — пропустить"
 		State.READY: game.status.text = "Ждём готовности друга" if ready_votes[slot] else "Нажми «Готов» или R"
 		State.COUNTDOWN: game.status.text = "Приготовься: %d…" % maxi(1, int(ceil(timer)))
 		State.AIM: game.status.text = "На удар осталось %d сек." % maxi(1, int(ceil(timer))) if local_shooter() else "Следи за мячом — друг готовит удар"
