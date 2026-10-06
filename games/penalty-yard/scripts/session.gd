@@ -6,6 +6,7 @@ const Rules = preload("res://scripts/rules.gd")
 const Tuning = preload("res://scripts/tuning.gd")
 const FieldRules = preload("res://scripts/field_rules.gd")
 const GameAudio = preload("res://scripts/audio.gd")
+const Settings = preload("res://scripts/settings.gd")
 const PROTOCOL := 4
 const DEFAULT_PORT := 24567
 enum State { WAITING, READY, COUNTDOWN, AIM, FLIGHT, RESULT, FINISHED, BUILD }
@@ -100,7 +101,7 @@ func build_room_ui() -> void:
 	stack.add_child(game.label("Один создаёт комнату. Второй вводит его IP и порт.", 17))
 	var row := HBoxContainer.new()
 	address_field = LineEdit.new()
-	address_field.text = "127.0.0.1"
+	address_field.text = str(game.settings.get("last_address", "127.0.0.1"))
 	address_field.placeholder_text = "IP хозяина комнаты"
 	address_field.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	address_field.custom_minimum_size = Vector2(310, 40)
@@ -108,7 +109,7 @@ func build_room_ui() -> void:
 	port_field = SpinBox.new()
 	port_field.min_value = 1024
 	port_field.max_value = 65535
-	port_field.value = DEFAULT_PORT
+	port_field.value = int(game.settings.get("last_port", DEFAULT_PORT))
 	row.add_child(port_field)
 	stack.add_child(row)
 	var actions := HBoxContainer.new()
@@ -191,6 +192,9 @@ func join_room(address: String, port: int) -> Error:
 		message = "Не удалось начать подключение. Проверь адрес и порт."
 		refresh_room()
 		return error
+	game.settings.last_address = address
+	game.settings.last_port = port
+	Settings.save_config(game.settings)
 	online = true
 	host = false
 	connected = false

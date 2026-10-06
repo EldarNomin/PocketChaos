@@ -1,6 +1,7 @@
 extends Node3D
 ## Shared immutable field during shots; preview geometry never collides.
 const FieldRules = preload("res://scripts/field_rules.gd")
+const Style = preload("res://scripts/style.gd")
 var game: Node3D
 var layout := FieldRules.empty_layout()
 var revision := -1
@@ -33,7 +34,7 @@ func _ready() -> void:
 	add_child(markers)
 	for cell in range(15):
 		var at := FieldRules.cell_position(cell)
-		box(markers, Vector3(0.75,0.012,0.75), at + Vector3(0,0.016,0), Color("769682"))
+		box(markers, Vector3(0.75,0.012,0.75), at + Vector3(0,0.016,0), Style.MARKER)
 		var number := Label3D.new()
 		number.text = str(cell + 1)
 		number.font_size = 44
@@ -73,7 +74,7 @@ func make_item(parent: Node3D, item: Dictionary, ghost := false) -> void:
 	var item_root := Node3D.new()
 	item_root.position = FieldRules.cell_position(int(item.cell))
 	parent.add_child(item_root)
-	var color := Color("dfaa61") if int(item.owner) == 0 else Color("69b5c5")
+	var color := Style.HOST_ITEM if int(item.owner) == 0 else Style.GUEST_ITEM
 	if ghost:
 		color.a = 0.42
 	if item.kind == "shield":

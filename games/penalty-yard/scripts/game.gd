@@ -6,6 +6,7 @@ const BallScript = preload("res://scripts/ball.gd")
 const YardScript = preload("res://scripts/yard.gd")
 const SessionScript = preload("res://scripts/session.gd")
 const FieldScript = preload("res://scripts/field.gd")
+const Style = preload("res://scripts/style.gd")
 const Settings = preload("res://scripts/settings.gd")
 const GameAudio = preload("res://scripts/audio.gd")
 const TutorialScript = preload("res://scripts/tutorial.gd")
@@ -81,29 +82,29 @@ func _ready() -> void:
 	gloves = Node3D.new()
 	add_child(gloves)
 	for x in [-0.20, 0.20]:
-		yard.box(Vector3(0.23, 0.28, 0.13), Vector3.ZERO, Color("e5aa69")).reparent(gloves)
+		yard.box(Vector3(0.23, 0.28, 0.13), Vector3.ZERO, Style.SKIN).reparent(gloves)
 		var glove := gloves.get_child(gloves.get_child_count() - 1) as MeshInstance3D
 		glove.position = Vector3(x, 0, 0)
-		var cuff: MeshInstance3D = yard.box(Vector3(0.19, 0.10, 0.16), Vector3.ZERO, Color("415863"))
+		var cuff: MeshInstance3D = yard.box(Vector3(0.19, 0.10, 0.16), Vector3.ZERO, Style.SHORTS)
 		cuff.reparent(gloves)
 		cuff.position = Vector3(x, -0.17, 0)
 	# Static training striker visible from the goalkeeper's position.
 	training_striker = Node3D.new()
 	add_child(training_striker)
-	yard.box(Vector3(0.5, 0.7, 0.3), Vector3(0, 1.05, 11), Color("d08256")).reparent(training_striker)
-	yard.box(Vector3(0.36, 0.36, 0.36), Vector3(0, 1.62, 11), Color("e4bd91")).reparent(training_striker)
+	yard.box(Vector3(0.5, 0.7, 0.3), Vector3(0, 1.05, 11), Style.STRIKER_JERSEY).reparent(training_striker)
+	yard.box(Vector3(0.36, 0.36, 0.36), Vector3(0, 1.62, 11), Style.SKIN).reparent(training_striker)
 	for x in [-0.16, 0.16]:
-		yard.box(Vector3(0.17, 0.65, 0.2), Vector3(x, 0.38, 11), Color("314858")).reparent(training_striker)
+		yard.box(Vector3(0.17, 0.65, 0.2), Vector3(x, 0.38, 11), Style.SHORTS).reparent(training_striker)
 	opponent_keeper = Node3D.new()
 	add_child(opponent_keeper)
-	yard.box(Vector3(0.55, 0.65, 0.3), Vector3(0, 1.0, 0.22), Color("619da5")).reparent(opponent_keeper)
-	yard.box(Vector3(0.35, 0.35, 0.35), Vector3(0, 1.5, 0.22), Color("e4bd91")).reparent(opponent_keeper)
+	yard.box(Vector3(0.55, 0.65, 0.3), Vector3(0, 1.0, 0.22), Style.KEEPER_JERSEY).reparent(opponent_keeper)
+	yard.box(Vector3(0.35, 0.35, 0.35), Vector3(0, 1.5, 0.22), Style.SKIN).reparent(opponent_keeper)
 	for x in [-0.17, 0.17]:
-		yard.box(Vector3(0.18, 0.65, 0.22), Vector3(x, 0.36, 0.22), Color("314858")).reparent(opponent_keeper)
+		yard.box(Vector3(0.18, 0.65, 0.22), Vector3(x, 0.36, 0.22), Style.SHORTS).reparent(opponent_keeper)
 	opponent_hands = Node3D.new()
 	add_child(opponent_hands)
 	for x in [-0.20, 0.20]:
-		yard.box(Vector3(0.23, 0.28, 0.13), Vector3(x, 0, 0), Color("e5aa69")).reparent(opponent_hands)
+		yard.box(Vector3(0.23, 0.28, 0.13), Vector3(x, 0, 0), Style.SKIN).reparent(opponent_hands)
 	aim_marker = MeshInstance3D.new()
 	var sphere := SphereMesh.new()
 	sphere.radius = 0.075
@@ -111,7 +112,7 @@ func _ready() -> void:
 	aim_marker.mesh = sphere
 	var marker_material := StandardMaterial3D.new()
 	marker_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	marker_material.albedo_color = Color("a2e1c1")
+	marker_material.albedo_color = Style.AIM
 	aim_marker.material_override = marker_material
 	add_child(aim_marker)
 	trail = ImmediateMesh.new()
@@ -119,7 +120,7 @@ func _ready() -> void:
 	trail_instance.mesh = trail
 	var trail_material := StandardMaterial3D.new()
 	trail_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	trail_material.albedo_color = Color("e4b26e")
+	trail_material.albedo_color = Style.TRAIL
 	trail_instance.material_override = trail_material
 	add_child(trail_instance)
 	for i in range(3):

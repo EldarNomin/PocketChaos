@@ -3,10 +3,10 @@ extends RefCounted
 
 const PATH := "user://settings.cfg"
 const SECTION := "game"
-const KEYS := ["volume", "fullscreen", "tutorial_seen"]
+const KEYS := ["volume", "fullscreen", "tutorial_seen", "last_address", "last_port"]
 
 static func defaults() -> Dictionary:
-	return {"volume": 0.7, "fullscreen": false, "tutorial_seen": false}
+	return {"volume": 0.7, "fullscreen": false, "tutorial_seen": false, "last_address": "127.0.0.1", "last_port": 24567}
 
 static func sanitize(data: Dictionary) -> Dictionary:
 	var result := defaults()
@@ -16,6 +16,12 @@ static func sanitize(data: Dictionary) -> Dictionary:
 		result.fullscreen = data.fullscreen
 	if data.has("tutorial_seen") and data.tutorial_seen is bool:
 		result.tutorial_seen = data.tutorial_seen
+	if data.has("last_address"):
+		var address := str(data.last_address).strip_edges()
+		if address.is_valid_ip_address():
+			result.last_address = address
+	if data.has("last_port") and (data.last_port is float or data.last_port is int) and is_finite(float(data.last_port)):
+		result.last_port = clampi(int(float(data.last_port)), 1024, 65535)
 	return result
 
 static func load_config() -> Dictionary:
