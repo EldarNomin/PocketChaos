@@ -4,6 +4,7 @@ const Rules = preload("res://scripts/rules.gd")
 const Tuning = preload("res://scripts/tuning.gd")
 const BallScript = preload("res://scripts/ball.gd")
 const YardScript = preload("res://scripts/yard.gd")
+const SessionScript = preload("res://scripts/session.gd")
 enum Mode { SHOOTER, KEEPER }
 enum Phase { READY, COUNTDOWN, FLIGHT, RESULT }
 
@@ -14,6 +15,10 @@ var camera: Camera3D
 var yard: Node3D
 var gloves: Node3D
 var training_striker: Node3D
+var opponent_keeper: Node3D
+var opponent_hands: Node3D
+var network: Node
+var ui_root: Control
 var aim_marker: MeshInstance3D
 var trail: ImmediateMesh
 var trail_points: Array[Vector3] = []
@@ -47,6 +52,8 @@ var pause_panel: Control
 var sound: AudioStreamPlayer
 var shooter_button: Button
 var keeper_button: Button
+var repeat_button: Button
+var pause_note: Label
 
 func _ready() -> void:
 	yard = Node3D.new()
@@ -76,6 +83,16 @@ func _ready() -> void:
 	yard.box(Vector3(0.36, 0.36, 0.36), Vector3(0, 1.62, 11), Color("e4bd91")).reparent(training_striker)
 	for x in [-0.16, 0.16]:
 		yard.box(Vector3(0.17, 0.65, 0.2), Vector3(x, 0.38, 11), Color("314858")).reparent(training_striker)
+	opponent_keeper = Node3D.new()
+	add_child(opponent_keeper)
+	yard.box(Vector3(0.55, 0.65, 0.3), Vector3(0, 1.0, 0.22), Color("619da5")).reparent(opponent_keeper)
+	yard.box(Vector3(0.35, 0.35, 0.35), Vector3(0, 1.5, 0.22), Color("e4bd91")).reparent(opponent_keeper)
+	for x in [-0.17, 0.17]:
+		yard.box(Vector3(0.18, 0.65, 0.22), Vector3(x, 0.36, 0.22), Color("314858")).reparent(opponent_keeper)
+	opponent_hands = Node3D.new()
+	add_child(opponent_hands)
+	for x in [-0.20, 0.20]:
+		yard.box(Vector3(0.23, 0.28, 0.13), Vector3(x, 0, 0), Color("e5aa69")).reparent(opponent_hands)
 	aim_marker = MeshInstance3D.new()
 	var sphere := SphereMesh.new()
 	sphere.radius = 0.075
@@ -99,6 +116,10 @@ func _ready() -> void:
 	add_child(sound)
 	build_ui()
 	reset_attempt()
+	network = Node.new()
+	network.set_script(SessionScript)
+	network.name = "Session"
+	add_child(network, true)
 
 func label(text_value: String, size := 18) -> Label:
 	var node := Label.new()
@@ -134,6 +155,7 @@ func build_ui() -> void:
 	root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	root.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	layer.add_child(root)
+	ui_root = root
 	var top := PanelContainer.new()
 	top.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)
 	top.offset_left = 22
@@ -156,7 +178,9 @@ func build_ui() -> void:
 	keeper_button = button("Вратарь · 2", func(): set_mode(Mode.KEEPER))
 	row.add_child(shooter_button)
 	row.add_child(keeper_button)
-	row.add_child(button("Повтор · R", reset_attempt))
+	repeat_button = button("Повтор · R", reset_attempt)
+	row.add_child(repeat_button)
+	row.add_child(button("Онлайн", func(): network.show_room()))
 	var bottom := PanelContainer.new()
 	bottom.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
 	bottom.offset_left = 22
@@ -188,24 +212,32 @@ func build_ui() -> void:
 	root.add_child(pause_panel)
 	var pause_stack := VBoxContainer.new()
 	pause_stack.add_child(label("Пауза", 30))
-	pause_stack.add_child(label("Локальная тренировка · этап 2", 18))
+	pause_note = label("Локальная тренировка", 18)
+	pause_stack.add_child(pause_note)
 	pause_stack.add_child(button("Продолжить · Esc", func(): set_paused(false)))
 	pause_stack.add_child(button("Выход", func(): get_tree().quit()))
 	pause_panel.add_child(pause_stack)
 	pause_panel.hide()
 
 func set_mode(value: Mode) -> void:
+	if network != null and network.online:
+		return
 	mode = value
 	reset_attempt()
 
 func set_paused(value: bool) -> void:
+	if value and network != null and network.online and network.local_shooter():
+		network.send_command("cancel", {})
 	paused = value
 	charging = false
 	power = 0.0
 	pause_panel.visible = paused
 	update_ui()
 
-func reset_attempt() -> void:
+func reset_attempt(local_override := false) -> void:
+	if not local_override and network != null and network.online:
+		network.ready_or_rematch()
+		return
 	phase = Phase.READY
 	charging = false
 	power = 0.0
@@ -230,16 +262,25 @@ func reset_attempt() -> void:
 		camera.look_at(Vector3(0, 1.1, 10))
 	gloves.visible = mode == Mode.KEEPER
 	training_striker.visible = mode == Mode.KEEPER
+	opponent_keeper.visible = false
+	opponent_hands.visible = false
 	update_pointer()
 	update_ui()
 
 func _input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_ESCAPE:
-		set_paused(not paused)
+		if network != null and network.room_panel.visible:
+			network.room_panel.hide()
+		else:
+			set_paused(not paused)
 		get_viewport().set_input_as_handled()
 
 func _unhandled_input(event: InputEvent) -> void:
-	if paused:
+	if paused or (network != null and network.room_panel.visible):
+		return
+	if network != null and network.online:
+		network.handle_input(event)
+		update_ui()
 		return
 	if event is InputEventKey and event.pressed and not event.echo:
 		match event.keycode:
@@ -315,7 +356,10 @@ func launch_training_shot() -> void:
 	fire(target, 0.35, 0.0)
 
 func _physics_process(delta: float) -> void:
-	if paused:
+	if network != null and network.online:
+		network.tick(delta)
+		return
+	if paused or (network != null and network.room_panel.visible):
 		return
 	if charging:
 		power = minf(1.0, power + delta / Tuning.CHARGE_TIME)
@@ -335,35 +379,43 @@ func _physics_process(delta: float) -> void:
 		if countdown <= 0.0:
 			launch_training_shot()
 	if phase == Phase.FLIGHT:
-		var previous: Vector3 = ball.step(delta)
-		var outcome := Rules.attempt_result(previous, ball.position, hand_target, mode == Mode.KEEPER and catch_remaining > 0.0)
-		if outcome != "":
-			finish_attempt(outcome)
-		elif mode == Mode.KEEPER:
-			# Simple torso block, distinct from an active hand catch.
-			var t := Rules.plane_crossing(previous, ball.position, 0.22)
-			if t >= 0.0:
-				var hit := previous.lerp(ball.position, t)
-				if absf(hit.x - keeper_x) < 0.38 + Rules.RADIUS and hit.y < 1.25:
-					ball.position.z = 0.24
-					ball.velocity.z = absf(ball.velocity.z) * 0.55
-					ball.velocity.y += 1.0
-					play_tone(95.0, 0.07)
-		if phase == Phase.FLIGHT:
-			if absf(ball.position.x) > 8.0 or ball.position.z < -2.0 or ball.position.z > 16.0 or ball.position.y > 8.0:
-				finish_attempt("miss")
-			elif ball.elapsed > Tuning.SHOT_TIMEOUT or (ball.elapsed > 1.0 and ball.velocity.length() < 0.3):
-				finish_attempt("miss")
-		trail_clock += delta
-		if trail_clock >= 0.04:
-			trail_clock = 0.0
-			trail_points.append(ball.position)
-			if trail_points.size() > 160:
-				trail_points.pop_front()
-			redraw_trail()
+		step_flight(delta, mode == Mode.KEEPER)
 	update_ui()
 
+func step_flight(delta: float, keeper_enabled: bool) -> void:
+	var previous: Vector3 = ball.step(delta)
+	var outcome := Rules.attempt_result(previous, ball.position, hand_target, keeper_enabled and catch_remaining > 0.0)
+	if outcome != "":
+		finish_attempt(outcome)
+	elif keeper_enabled:
+		var t := Rules.plane_crossing(previous, ball.position, 0.22)
+		if t >= 0.0:
+			var hit := previous.lerp(ball.position, t)
+			if absf(hit.x - keeper_x) < 0.38 + Rules.RADIUS and hit.y < 1.25:
+				ball.position.z = 0.24
+				ball.velocity.z = absf(ball.velocity.z) * 0.55
+				ball.velocity.y += 1.0
+				play_tone(95.0, 0.07)
+	if phase == Phase.FLIGHT:
+		if absf(ball.position.x) > 8.0 or ball.position.z < -2.0 or ball.position.z > 16.0 or ball.position.y > 8.0:
+			finish_attempt("miss")
+		elif ball.elapsed > Tuning.SHOT_TIMEOUT or (ball.elapsed > 1.0 and ball.velocity.length() < 0.3):
+			finish_attempt("miss")
+	record_trail(delta)
+
+func record_trail(delta: float) -> void:
+	trail_clock += delta
+	if trail_clock >= 0.04:
+		trail_clock = 0.0
+		trail_points.append(ball.position)
+		if trail_points.size() > 160:
+			trail_points.pop_front()
+		redraw_trail()
+
 func finish_attempt(outcome: String) -> void:
+	if network != null and network.online:
+		network.finish_attempt(outcome)
+		return
 	if phase != Phase.FLIGHT:
 		return
 	phase = Phase.RESULT
@@ -397,8 +449,14 @@ func redraw_trail() -> void:
 func update_ui() -> void:
 	if header == null:
 		return
+	if network != null and network.online:
+		network.draw_ui()
+		return
 	header.text = "Тренировка удара" if mode == Mode.SHOOTER else "Тренировка вратаря"
-	stats.text = "Голы: %d / %d   ·   Защищённые попытки: %d / %d   ·   Локальный прототип 0.2" % [goals, shots_completed, saves, keeper_completed]
+	stats.text = "Голы: %d / %d   ·   Защищённые попытки: %d / %d   ·   Тренировка 0.3" % [goals, shots_completed, saves, keeper_completed]
+	repeat_button.text = "Повтор · R"
+	repeat_button.disabled = false
+	pause_note.text = "Локальная тренировка"
 	shooter_button.disabled = mode == Mode.SHOOTER
 	keeper_button.disabled = mode == Mode.KEEPER
 	power_bar.visible = mode == Mode.SHOOTER
