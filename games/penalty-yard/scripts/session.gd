@@ -568,6 +568,7 @@ func _tick_host(delta: float) -> void:
 		game.gloves.position = game.hand_target
 	game.opponent_keeper.position.x = game.keeper_x
 	game.opponent_hands.position = game.hand_target
+	game.update_keeper_arms()
 	if state == State.BUILD:
 		timer -= delta
 		if timer <= 0:
@@ -624,6 +625,7 @@ func _tick_client(delta: float, axis: float) -> void:
 			game.update_pointer()
 	game.opponent_keeper.position.x = remote_keeper_x
 	game.opponent_hands.position = remote_hands
+	game.update_keeper_arms()
 	if state == State.FLIGHT:
 		game.record_trail(delta)
 
@@ -755,14 +757,14 @@ func draw_ui() -> void:
 	game.pause_note.text = "Матч продолжается, пока открыто меню."
 	if not connected:
 		game.header.text = "Ждём подключения"
-		game.stats.text = "Сетевая дуэль · версия 0.5"
+		game.stats.text = "Сетевая дуэль · версия 0.7"
 		game.status.text = "Открой «Онлайн», чтобы увидеть состояние комнаты"
 		game.detail.text = message
 		game.controls.text = "Локальная тренировка доступна после выхода из комнаты"
 		return
 	var slot := local_slot()
 	game.header.text = "Твой удар" if local_shooter() else "Ты защищаешь ворота"
-	game.stats.text = "Ты %d : %d Друг   ·   %s   ·   Онлайн 0.5" % [match_rules.scores[slot], match_rules.scores[1 - slot], "Раунд %d / 5" % (match_rules.round_index + 1) if match_rules.round_index < 5 else "Дополнительные попытки"]
+	game.stats.text = "Ты %d : %d Друг   ·   %s   ·   Онлайн 0.7" % [match_rules.scores[slot], match_rules.scores[1 - slot], "Раунд %d / 5" % (match_rules.round_index + 1) if match_rules.round_index < 5 else "Дополнительные попытки"]
 	game.detail.text = "Подкрутка: %s   ·   Сила: %d%%" % [["влево", "нет", "вправо"][game.spin + 1], int(game.power * 100)] if local_shooter() else "Рывок: %s   ·   Ловля: %s" % ["использован" if game.dash_used else "готов", "активна" if game.catch_remaining > 0 else "готова"]
 	game.controls.text = "Мышь — прицел   ·   ЛКМ удержать и отпустить — удар   ·   Q / E — подкрутка   ·   ПКМ — отмена" if local_shooter() else "A / D — движение   ·   Мышь — руки   ·   ЛКМ — ловля   ·   Space + A / D — рывок"
 	match state:

@@ -10,6 +10,7 @@ const Style = preload("res://scripts/style.gd")
 const Settings = preload("res://scripts/settings.gd")
 const GameAudio = preload("res://scripts/audio.gd")
 const TutorialScript = preload("res://scripts/tutorial.gd")
+const FigureScript = preload("res://scripts/figure.gd")
 enum Mode { SHOOTER, KEEPER }
 enum Phase { READY, COUNTDOWN, FLIGHT, RESULT }
 
@@ -88,23 +89,31 @@ func _ready() -> void:
 		var cuff: MeshInstance3D = yard.box(Vector3(0.19, 0.10, 0.16), Vector3.ZERO, Style.SHORTS)
 		cuff.reparent(gloves)
 		cuff.position = Vector3(x, -0.17, 0)
+		var forearm: MeshInstance3D = yard.box(Vector3(0.13, 0.38, 0.14), Vector3(x, -0.44, 0.07), Style.KEEPER_JERSEY)
+		forearm.reparent(gloves)
+		forearm.rotation_degrees.x = 24
 	# Static training striker visible from the goalkeeper's position.
 	training_striker = Node3D.new()
+	training_striker.set_script(FigureScript)
+	training_striker.shirt_number = "9"
 	add_child(training_striker)
-	yard.box(Vector3(0.5, 0.7, 0.3), Vector3(0, 1.05, 11), Style.STRIKER_JERSEY).reparent(training_striker)
-	yard.box(Vector3(0.36, 0.36, 0.36), Vector3(0, 1.62, 11), Style.SKIN).reparent(training_striker)
-	for x in [-0.16, 0.16]:
-		yard.box(Vector3(0.17, 0.65, 0.2), Vector3(x, 0.38, 11), Style.SHORTS).reparent(training_striker)
+	training_striker.position = Vector3(0, 0, 11)
 	opponent_keeper = Node3D.new()
+	opponent_keeper.set_script(FigureScript)
+	opponent_keeper.jersey = Style.KEEPER_JERSEY
+	opponent_keeper.shirt_number = "1"
 	add_child(opponent_keeper)
-	yard.box(Vector3(0.55, 0.65, 0.3), Vector3(0, 1.0, 0.22), Style.KEEPER_JERSEY).reparent(opponent_keeper)
-	yard.box(Vector3(0.35, 0.35, 0.35), Vector3(0, 1.5, 0.22), Style.SKIN).reparent(opponent_keeper)
-	for x in [-0.17, 0.17]:
-		yard.box(Vector3(0.18, 0.65, 0.22), Vector3(x, 0.36, 0.22), Style.SHORTS).reparent(opponent_keeper)
+	opponent_keeper.position = Vector3(0, 0, 0.22)
+	opponent_keeper.rotation_degrees.y = 180
 	opponent_hands = Node3D.new()
 	add_child(opponent_hands)
-	for x in [-0.20, 0.20]:
-		yard.box(Vector3(0.23, 0.28, 0.13), Vector3(x, 0, 0), Style.SKIN).reparent(opponent_hands)
+	for side in [-0.20, 0.20]:
+		yard.box(Vector3(0.23, 0.28, 0.13), Vector3(side, 0, 0), Style.SKIN).reparent(opponent_hands)
+		var glove: MeshInstance3D = opponent_hands.get_child(opponent_hands.get_child_count() - 1)
+		glove.position = Vector3(side, 0, 0)
+		var sleeve: MeshInstance3D = yard.box(Vector3(0.13, 0.36, 0.14), Vector3(side, -0.30, 0.06), Style.KEEPER_JERSEY)
+		sleeve.reparent(opponent_hands)
+		sleeve.rotation_degrees.x = 24
 	aim_marker = MeshInstance3D.new()
 	var sphere := SphereMesh.new()
 	sphere.radius = 0.075
@@ -588,7 +597,7 @@ func update_ui() -> void:
 		network.draw_ui()
 		return
 	header.text = "Тренировка удара" if mode == Mode.SHOOTER else "Тренировка вратаря"
-	stats.text = "Голы: %d / %d   ·   Защищённые попытки: %d / %d   ·   Тренировка 0.5" % [goals, shots_completed, saves, keeper_completed]
+	stats.text = "Голы: %d / %d   ·   Защищённые попытки: %d / %d   ·   Тренировка 0.7" % [goals, shots_completed, saves, keeper_completed]
 	repeat_button.text = "Повтор · R"
 	repeat_button.disabled = false
 	pause_note.text = "Локальная тренировка"
@@ -612,6 +621,12 @@ func update_ui() -> void:
 		Phase.COUNTDOWN: status.text = "Удар через %d…" % maxi(1, int(ceil(countdown)))
 		Phase.FLIGHT: status.text = "Мяч в игре" if mode == Mode.SHOOTER else "Лови!"
 		Phase.RESULT: status.text = result_text + "   ·   R — следующая попытка"
+
+func update_keeper_arms() -> void:
+	if opponent_keeper == null or not opponent_keeper.visible:
+		return
+	var base: Vector3 = opponent_hands.global_position
+	opponent_keeper.aim_arms(base + Vector3(-0.2, 0, 0), base + Vector3(0.2, 0, 0))
 
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_APPLICATION_FOCUS_OUT and pause_panel != null:

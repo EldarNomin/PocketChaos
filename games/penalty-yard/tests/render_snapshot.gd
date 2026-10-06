@@ -20,6 +20,12 @@ func run() -> void:
 		await process_frame
 	await _shot(directory + "/view_keeper.png")
 	game.set_mode(game.Mode.SHOOTER)
+	game.opponent_keeper.visible = true
+	game.opponent_hands.position = Vector3(0.6, 1.35, 0.6)
+	game.update_keeper_arms()
+	for i in range(5):
+		await process_frame
+	await _shot(directory + "/view_shooter_vs_keeper.png")
 	game.field.toggle_practice()
 	for i in range(10):
 		await process_frame

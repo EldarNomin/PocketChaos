@@ -84,6 +84,6 @@ func _ready() -> void:
 	var sun := DirectionalLight3D.new()
 	sun.rotation_degrees = Vector3(-35, -30, 0)
 	sun.light_color = Style.SUN
-	sun.light_energy = 1.4
+	sun.light_energy = 1.25
 	sun.shadow_enabled = true
 	add_child(sun)
